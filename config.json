@@ -1,0 +1,5 @@
+{
+  "firebase_host": "xxxxxx-rtdb.firebaseio.com",
+  "firebase_auth": "firebase_database_secret",
+  "schedule": "20000"
+}
