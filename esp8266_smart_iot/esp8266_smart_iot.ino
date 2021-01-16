@@ -1,17 +1,33 @@
-#include <FS.h>          // this needs to be first, or it all crashes and burns...
+#include <NTPClient.h>
+#include <FirebaseESP8266.h>
+#include <FS.h> // this needs to be first, or it all crashes and burns...
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
 #include "DHT.h"
-#include <FirebaseArduino.h>
-
+//#include <FirebaseArduino.h>
+#include <time.h> 
 #ifdef ESP32
   #include <SPIFFS.h>
 #endif
 
+
 //define your default values here, if there are different values in config.json, they are overwritten.
-char firebase_host[100] = "FIREBASE_HOST";
-char firebase_auth[45] = "DATABASE_SECRET";
-char schedule[7] = "20000";
+char firebase_host[100] = "humidity-50ec7-default-rtdb.firebaseio.com";
+char firebase_auth[45] = "X3MGAedyY3SdKMqGvZW57afZ4GsWtixUxXorP6at";
+
+#define FIREBASE_HOST "humidity-50ec7-default-rtdb.firebaseio.com"
+#define FIREBASE_KEY "X3MGAedyY3SdKMqGvZW57afZ4GsWtixUxXorP6at"
+#define API_KEY "AIzaSyD45H0aR3l-gd0XlP2d7o83jHmWnDy1VSw"
+/* Define the user Email and password that alreadey registerd or added in your project */
+#define USER_EMAIL "w.wuthikun@gmail.com"
+#define USER_PASSWORD "y@er2021"
+
+FirebaseData firebaseData;
+FirebaseAuth auth;
+FirebaseConfig config;
+bool wifiState = false;
+bool humidityState = false;
+char schedule[20] = "1800000";
 
 // SET RELAY PIN
 #define D1 5   // เนื่องจากขาของ ESP8266 คือขาที่16 แต่ขาที่โชว์บนบอร์ด NodeMCU คือขา D0
@@ -29,13 +45,19 @@ bool shouldSaveConfig = false;
 #define DHTPIN 2
 #define DHTTYPE DHT22
 
-// Config time
-int timezone = 7;
 
-char ntp_server1[20] = "ntp.ku.ac.th";
-char ntp_server2[20] = "fw.eng.ku.ac.th";
+
+// Config time
+int timezoneOffset = 25200;
+
+
+
+
+char ntp_server1[20] = "pool.ntp.org";
+char ntp_server2[20] = "time.nist.gov";
 char ntp_server3[20] = "time.uni.net.th";
 int dst = 0;
+
 
 // SET LIB
 DHT dht(DHTPIN, DHTTYPE);
@@ -93,8 +115,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
-  pinMode(relay_1, OUTPUT);
-  digitalWrite(relay_1, HIGH);
+//  pinMode(relay_1, OUTPUT);
+//  digitalWrite(relay_1, HIGH);
 
   setupSpiffs();
 
@@ -111,7 +133,7 @@ void setup() {
   // id/name placeholder/prompt default length
   WiFiManagerParameter custom_firebase_host("fbhost", "firebase host", firebase_host, 100);
   WiFiManagerParameter custom_firebase_auth("fbauth", "firebase authost", firebase_auth, 45);
-  WiFiManagerParameter custom_schedule("HM", "schedule push dht", schedule, 7);
+  WiFiManagerParameter custom_schedule("HM", "schedule push dht", schedule, 20);
 
   //add all your parameters here
   wm.addParameter(&custom_firebase_host);
@@ -125,7 +147,7 @@ void setup() {
   //If connection fails it starts an access point with the specified name
   //here  "AutoConnectAP" if empty will auto generate basedcon chipid, if password is blank it will be anonymous
   //and goes into a blocking loop awaiting configuration
-  if (!wm.autoConnect("MeeiIoT", "#qazwsx.edc")) {
+  if (!wm.autoConnect("dht", "y@er2021")) {
     Serial.println("failed to connect and hit timeout");
     delay(3000);
     // if we still have not connected restart and try all over again
@@ -171,24 +193,55 @@ void setup() {
   Serial.println(firebase_auth);
   Serial.println(schedule);
 
-  configTime(timezone * 3600, dst, ntp_server1, ntp_server2, ntp_server3);
-  Serial.println("Waiting for time");
-  while (!time(nullptr)) {
-    Serial.print(".");
-    delay(500);
-  }
-  Serial.println();
-  Serial.println("Now: " + NowString());
+  
 
-  Firebase.begin(firebase_host, firebase_auth);
-  Firebase.stream("/configs");
 
+loadConfigTime();
+
+  /* Assign the user sign in credentials */
+    auth.user.email = USER_EMAIL;
+    auth.user.password = USER_PASSWORD;
+ /* Assign the project host and api key (required) */
+    config.host = FIREBASE_HOST;
+    config.api_key = API_KEY;
+    
+//  Firebase.begin(firebase_host, firebase_auth);
+//Firebase.begin(FIREBASE_HOST, FIREBASE_KEY);
+ /* Initialize the library with the Firebase authen and config */
+    Firebase.begin(&config, &auth);
+
+
+ bool wifiState = true;
+if(Firebase.setBool(firebaseData, "/sensors/wifiState", wifiState)) {
+    Serial.println("Added"); 
+} else {
+    Serial.println("Error : " + firebaseData.errorReason());
+}
   dht.begin();
+
+ 
+
+
 }
 
+void loadConfigTime() {
+  
+  configTime(timezoneOffset, dst, ntp_server1, ntp_server2, ntp_server3);
+  
+  while (!time(nullptr)) {
+    Serial.print(".");
+    delay(1000);
+  }
+  
+}
+
+
+
 void loop() {
-//  delay(2000);
-  StreamAll();
+
+loadConfigTime();
+
+  
   // Reading temperature or humidity takes about 250 milliseconds!
   // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
   float h = dht.readHumidity();
@@ -199,10 +252,31 @@ void loop() {
 
   // Check if any reads failed and exit early (to try again).
   if (isnan(h) || isnan(t) || isnan(f)) {
+
+     bool humidityState = false;
+    if(Firebase.setBool(firebaseData, "/sensors/humidityState", humidityState)) {
+        Serial.println("Added humidityState false"); 
+    } else {
+        Serial.println("Error humidityState false: " + firebaseData.errorReason());
+    }
     Serial.println(F("Failed to read from DHT sensor!"));
     delay(atoi(schedule));
     return;
   }
+
+     bool humidityState = true;
+    if(Firebase.setBool(firebaseData, "/sensors/humidityState", humidityState)) {
+        Serial.println("Added humudityState true"); 
+    } else {
+        Serial.println("Error humudityState true: " + firebaseData.errorReason());
+    }
+
+
+
+
+  
+
+  delay(atoi(schedule));
 
   // Compute heat index in Fahrenheit (the default)
   float hif = dht.computeHeatIndex(f, h);
@@ -220,85 +294,47 @@ void loop() {
   Serial.print(F("°C "));
   Serial.print(hif);
   Serial.println(F("°F"));
+  Serial.println(Date());
+Serial.println(Time());
 
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  root["temperature"] = t;
-  root["humidity"] = h;
-  root["time"] = NowString();
 
-  // append a new value to /logDHT
-  String name = Firebase.push("logDHT", root);
-  
-  // handle error
-  if (Firebase.failed()) {
-      Serial.print("pushing /logDHT failed:");
-      Serial.println(Firebase.error());  
-      return;
-  }
+  FirebaseJson data;
+data.set("temperature", t);
+data.set("humidity", h);
+data.set("date", Date());
+data.set("time", Time());
 
-  Serial.print("pushed: /logDHT/");
-  Serial.println(name);
-  delay(atoi(schedule));
+if(Firebase.pushJSON(firebaseData, "/logDHT", data)) {
+    Serial.print("pushed: /logDHT/");
+} else {
+    Serial.println("pushing /logDHT failed: " + firebaseData.errorReason());
+    return;
 }
-
-void StreamAll() {
-    // handle error
-  if (Firebase.failed()) {
-      Serial.print("stream all failed:");
-      Serial.println(Firebase.error());  
-      return;
-  }
-    if (Firebase.available()) {
-     FirebaseObject event = Firebase.readEvent();
-     String eventType = event.getString("type");
-     eventType.toLowerCase();
-     
-     Serial.print("event: ");
-     Serial.println(eventType);
-     if (eventType == "put") {
-       Serial.print("data: ");
-       Serial.println(event.getString("data"));
-       String path = event.getString("path");
-       String data = event.getString("data");
-
-       int dataInt = event.getInt("data");
-       Serial.print("dataInt: ");
-       Serial.println(dataInt);
-
-       Serial.print("path: ");
-       Serial.println(path);
-
-       if (path == "/relay1") {
-          Serial.print("Open Relay 1:");
-          // digitalWrite(relay_1, dataInt);
-       }
-
-       if (path == "/schedules") {
-          char dataTimeStr[7];
-          data.toCharArray(dataTimeStr, 7);
-         strcpy(schedule, dataTimeStr);
-       }
-     }
-  }   
 
 }
 
-String NowString() {
-  time_t now = time(nullptr);
-  struct tm* newtime = localtime(&now);
 
-  String tmpNow = "";
-  tmpNow += String(newtime->tm_year + 1900);
-  tmpNow += "-";
-  tmpNow += String(newtime->tm_mon + 1);
-  tmpNow += "-";
-  tmpNow += String(newtime->tm_mday);
-  tmpNow += " ";
-  tmpNow += String(newtime->tm_hour);
-  tmpNow += ":";
-  tmpNow += String(newtime->tm_min);
-  tmpNow += ":";
-  tmpNow += String(newtime->tm_sec);
-  return tmpNow;
+
+String Date() {
+  loadConfigTime();
+  time_t timer;
+  char buffer[26];
+  struct tm* tm_info;
+
+  timer = time(NULL);
+  tm_info = localtime(&timer);
+
+  strftime(buffer, 26, "%Y-%m-%d", tm_info);
+  puts(buffer);
+  return buffer;
+}
+
+String Time() {
+  time_t rawtime = time(nullptr);
+  struct tm * timeinfo = localtime(&rawtime);
+  char buffer [80];
+  time (&rawtime);
+  timeinfo = localtime (&rawtime);
+  strftime (buffer,80,"%T",timeinfo);
+  return buffer;
 }
